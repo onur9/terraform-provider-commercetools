@@ -5,10 +5,8 @@ import (
 	"fmt"
 	"log"
 	"strings"
-	"time"
 
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"github.com/labd/commercetools-go-sdk/platform"
 )
@@ -52,8 +50,7 @@ func resourceProjectSettings() *schema.Resource {
 			"currencies": {
 				Description: "A three-digit currency code as per [ISO 4217](https://en.wikipedia.org/wiki/ISO_4217)",
 				Type:        schema.TypeList,
-				MinItems:    1,
-				Required:    true,
+				Optional:    true,
 				Elem:        &schema.Schema{Type: schema.TypeString},
 				DiffSuppressFunc: func(k, old, new string, d *schema.ResourceData) bool {
 					return strings.EqualFold(old, new)
@@ -71,8 +68,7 @@ func resourceProjectSettings() *schema.Resource {
 			"languages": {
 				Description: "[IETF Language Tag](https://en.wikipedia.org/wiki/IETF_language_tag)",
 				Type:        schema.TypeList,
-				MinItems:    1,
-				Required:    true,
+				Optional:    true,
 				Elem:        &schema.Schema{Type: schema.TypeString},
 				DiffSuppressFunc: func(k, old, new string, d *schema.ResourceData) bool {
 					return strings.EqualFold(old, new)
@@ -187,8 +183,10 @@ func resourceProjectExists(d *schema.ResourceData, m interface{}) (bool, error) 
 
 	_, err := client.Get().Execute(context.Background())
 	if err != nil {
-		if IsResourceNotFoundError(err) {
-			return false, nil
+		if ctErr, ok := err.(platform.ErrorResponse); ok {
+			if ctErr.StatusCode == 404 {
+				return false, nil
+			}
 		}
 		return false, err
 	}
@@ -200,8 +198,10 @@ func resourceProjectCreate(ctx context.Context, d *schema.ResourceData, m interf
 	project, err := client.Get().Execute(ctx)
 
 	if err != nil {
-		if IsResourceNotFoundError(err) {
-			return nil
+		if ctErr, ok := err.(platform.ErrorResponse); ok {
+			if ctErr.StatusCode == 404 {
+				return nil
+			}
 		}
 		return diag.FromErr(err)
 	}
@@ -220,8 +220,10 @@ func resourceProjectRead(ctx context.Context, d *schema.ResourceData, m interfac
 	project, err := client.Get().Execute(ctx)
 
 	if err != nil {
-		if IsResourceNotFoundError(err) {
-			return nil
+		if ctErr, ok := err.(platform.ErrorResponse); ok {
+			if ctErr.StatusCode == 404 {
+				return nil
+			}
 		}
 		return diag.FromErr(err)
 	}
@@ -236,12 +238,12 @@ func resourceProjectRead(ctx context.Context, d *schema.ResourceData, m interfac
 	d.Set("currencies", project.Currencies)
 	d.Set("countries", project.Countries)
 	d.Set("languages", project.Languages)
-	d.Set("shipping_rate_input_type", flattenProjectShippingRateInputType(project.ShippingRateInputType))
-	d.Set("enable_search_index_products", flattenProjectSearchIndexProducts(project.SearchIndexing))
-	d.Set("enable_search_index_orders", flattenProjectSearchIndexOrders(project.SearchIndexing))
-	d.Set("external_oauth", flattenProjectExternalOAuth(project.ExternalOAuth, d.Get("external_oauth")))
-	d.Set("carts", flattenProjectCarts(project.Carts))
-	d.Set("messages", flattenProjectMessages(project.Messages, d))
+	d.Set("shipping_rate_input_type", marshallProjectShippingRateInputType(project.ShippingRateInputType))
+	d.Set("enable_search_index_products", marshallProjectSearchIndexProducts(project.SearchIndexing))
+	d.Set("enable_search_index_orders", marshallProjectSearchIndexOrders(project.SearchIndexing))
+	d.Set("external_oauth", marshallProjectExternalOAuth(project.ExternalOAuth, d.Get("external_oauth")))
+	d.Set("carts", marshallProjectCarts(project.Carts))
+	d.Set("messages", marshallProjectMessages(project.Messages, d))
 	return nil
 }
 
@@ -388,10 +390,7 @@ func projectUpdate(ctx context.Context, d *schema.ResourceData, client *platform
 		)
 	}
 
-	err := resource.RetryContext(ctx, 20*time.Second, func() *resource.RetryError {
-		_, err := client.Post(input).Execute(ctx)
-		return processRemoteError(err)
-	})
+	_, err := client.Post(input).Execute(ctx)
 	return diag.FromErr(err)
 }
 
@@ -427,7 +426,7 @@ func getCartClassificationValues(d *schema.ResourceData) ([]platform.CustomField
 	data := d.Get("shipping_rate_cart_classification_value").([]interface{})
 	for _, item := range data {
 		itemMap := item.(map[string]interface{})
-		label := expandLocalizedString(itemMap["label"].(map[string]interface{}))
+		label := unmarshallLocalizedString(itemMap["label"].(map[string]interface{}))
 		values = append(values, platform.CustomFieldLocalizedEnumValue{
 			Label: label,
 			Key:   itemMap["key"].(string),
@@ -436,7 +435,7 @@ func getCartClassificationValues(d *schema.ResourceData) ([]platform.CustomField
 	return values, nil
 }
 
-func flattenProjectCarts(val platform.CartsConfiguration) []map[string]interface{} {
+func marshallProjectCarts(val platform.CartsConfiguration) []map[string]interface{} {
 	if !*val.CountryTaxRateFallbackEnabled && val.DeleteDaysAfterLastModification == nil {
 		return []map[string]interface{}{}
 	}
@@ -450,7 +449,7 @@ func flattenProjectCarts(val platform.CartsConfiguration) []map[string]interface
 	return result
 }
 
-func flattenProjectExternalOAuth(val *platform.ExternalOAuth, current interface{}) []map[string]interface{} {
+func marshallProjectExternalOAuth(val *platform.ExternalOAuth, current interface{}) []map[string]interface{} {
 	if val == nil {
 		return []map[string]interface{}{}
 	}
@@ -472,7 +471,7 @@ func flattenProjectExternalOAuth(val *platform.ExternalOAuth, current interface{
 	}
 }
 
-func flattenProjectSearchIndexProducts(val *platform.SearchIndexingConfiguration) bool {
+func marshallProjectSearchIndexProducts(val *platform.SearchIndexingConfiguration) bool {
 	if val == nil {
 		return false
 	}
@@ -483,7 +482,7 @@ func flattenProjectSearchIndexProducts(val *platform.SearchIndexingConfiguration
 	return false
 }
 
-func flattenProjectSearchIndexOrders(val *platform.SearchIndexingConfiguration) bool {
+func marshallProjectSearchIndexOrders(val *platform.SearchIndexingConfiguration) bool {
 	if val == nil {
 		return false
 	}
@@ -494,7 +493,7 @@ func flattenProjectSearchIndexOrders(val *platform.SearchIndexingConfiguration) 
 	return false
 }
 
-func flattenProjectShippingRateInputType(val platform.ShippingRateInputType) string {
+func marshallProjectShippingRateInputType(val platform.ShippingRateInputType) string {
 	switch val.(type) {
 	case platform.CartScoreType:
 		return "CartScore"
@@ -506,7 +505,7 @@ func flattenProjectShippingRateInputType(val platform.ShippingRateInputType) str
 	return ""
 }
 
-func flattenProjectMessages(val platform.MessagesConfiguration, d *schema.ResourceData) []map[string]interface{} {
+func marshallProjectMessages(val platform.MessagesConfiguration, d *schema.ResourceData) []map[string]interface{} {
 	if current, ok := d.Get("messages").([]interface{}); ok {
 		if len(current) == 0 && !val.Enabled {
 			return nil
