@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/hashicorp/terraform-plugin-sdk/helper/resource"
-	"github.com/hashicorp/terraform-plugin-sdk/terraform"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
 )
 
 func TestAccProductDiscountCreate_basic(t *testing.T) {
@@ -20,7 +20,7 @@ func TestAccProductDiscountCreate_basic(t *testing.T) {
 				Config: testAccProductDiscountConfig(),
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttr(
-						"commercetools_product_discount.standard", "key", "standard_new",
+						"commercetools_product_discount.standard", "key", "standard",
 					),
 					resource.TestCheckResourceAttr(
 						"commercetools_product_discount.standard", "name.en", "standard name",
@@ -29,28 +29,25 @@ func TestAccProductDiscountCreate_basic(t *testing.T) {
 						"commercetools_product_discount.standard", "description.en", "Standard description",
 					),
 					resource.TestCheckResourceAttr(
-						"commercetools_product_discount.standard", "sort_order", "0.1",
+						"commercetools_product_discount.standard", "sort_order", "0.95",
 					),
 					resource.TestCheckResourceAttr(
 						"commercetools_product_discount.standard", "predicate", "1=1",
 					),
 					resource.TestCheckResourceAttr(
-						"commercetools_product_discount.standard", "valid_from", "2021-01-01T00:00:00.000Z",
+						"commercetools_product_discount.standard", "valid_from", "2018-01-02T15:04:05Z",
 					),
 					resource.TestCheckResourceAttr(
-						"commercetools_product_discount.standard", "valid_until", "2022-01-01T00:00:00.000Z",
+						"commercetools_product_discount.standard", "valid_until", "2019-01-02T15:04:05Z",
 					),
 					resource.TestCheckResourceAttr(
-						"commercetools_product_discount.standard", "value.0.type", "absolute",
+						"commercetools_product_discount.standard", "value.0.type", "relative",
 					),
 					resource.TestCheckResourceAttr(
-						"commercetools_product_discount.standard", "value.0.money.currency_code", "EUR",
+						"commercetools_product_discount.standard", "value.0.permyriad", "1000",
 					),
 					resource.TestCheckResourceAttr(
-						"commercetools_product_discount.standard", "value.0.money.cent_amount", "50",
-					),
-					resource.TestCheckResourceAttr(
-						"commercetools_product_discount.standard", "is_active", "false",
+						"commercetools_product_discount.standard", "is_active", "true",
 					),
 				),
 			},
@@ -61,7 +58,7 @@ func TestAccProductDiscountCreate_basic(t *testing.T) {
 						"commercetools_product_discount.standard", "key", "standard_new",
 					),
 					resource.TestCheckResourceAttr(
-						"commercetools_product_discount.standard", "name.en", "standard name new",
+						"commercetools_product_discount.standard", "name.en", "standard name",
 					),
 					resource.TestCheckResourceAttr(
 						"commercetools_product_discount.standard", "description.en", "Standard description new",
@@ -73,10 +70,45 @@ func TestAccProductDiscountCreate_basic(t *testing.T) {
 						"commercetools_product_discount.standard", "predicate", "1=1",
 					),
 					resource.TestCheckResourceAttr(
-						"commercetools_product_discount.standard", "valid_from", "2021-01-01T00:00:00.000Z",
+						"commercetools_product_discount.standard", "valid_from", "2018-01-02T15:04:05Z",
 					),
 					resource.TestCheckResourceAttr(
-						"commercetools_product_discount.standard", "valid_until", "2022-01-01T00:00:00.000Z",
+						"commercetools_product_discount.standard", "valid_until", "2019-01-02T15:04:05Z",
+					),
+					resource.TestCheckResourceAttr(
+						"commercetools_product_discount.standard", "value.0.type", "relative",
+					),
+					resource.TestCheckResourceAttr(
+						"commercetools_product_discount.standard", "value.0.permyriad", "1000",
+					),
+					resource.TestCheckResourceAttr(
+						"commercetools_product_discount.standard", "is_active", "false",
+					),
+				),
+			},
+			{
+				Config: testAccProductDiscountRemoveProperties(),
+				Check: resource.ComposeTestCheckFunc(
+					resource.TestCheckResourceAttr(
+						"commercetools_product_discount.standard", "key", "standard_new",
+					),
+					resource.TestCheckResourceAttr(
+						"commercetools_product_discount.standard", "name.en", "standard name",
+					),
+					resource.TestCheckNoResourceAttr(
+						"commercetools_product_discount.standard", "description.en",
+					),
+					resource.TestCheckResourceAttr(
+						"commercetools_product_discount.standard", "sort_order", "0.8",
+					),
+					resource.TestCheckResourceAttr(
+						"commercetools_product_discount.standard", "predicate", "1=1",
+					),
+					resource.TestCheckResourceAttr(
+						"commercetools_product_discount.standard", "valid_from", "",
+					),
+					resource.TestCheckResourceAttr(
+						"commercetools_product_discount.standard", "valid_until", "",
 					),
 					resource.TestCheckResourceAttr(
 						"commercetools_product_discount.standard", "value.0.type", "relative",
@@ -94,49 +126,69 @@ func TestAccProductDiscountCreate_basic(t *testing.T) {
 }
 
 func testAccProductDiscountConfig() string {
-	return `
+	return fmt.Sprintf(`
 	resource "commercetools_product_discount" "standard" {
-	  name        = {
-		en = "standard name new"
-	  }
-	  key         = "standard_new"
-	  description = {
-		en = "Standard description new"
-	  }
-	  predicate   = "1=1"
-	  sort_order  = "0.1"
-	  valid_from  = "2021-01-01T00:00:00.000Z"
-	  valid_until = "2022-01-01T00:00:00.000Z"
-	  value {
-		type = "absolute"
-		money {
-		  currency_code = "EUR"
-		  cent_amount   = 50
+		key = "standard"
+		name = {
+		  en = "standard name"
+		}
+		description = {
+			en = "Standard description"
+		  }
+		predicate              = "1=1"
+		sort_order             = "0.95"
+		is_active              = true
+		valid_from             = "2018-01-02T15:04:05Z"
+		valid_until            = "2019-01-02T15:04:05Z"
+
+		value {
+			type      = "relative"
+			permyriad = 1000
 		}
 	  }
-	}
-	`
+	  `)
 }
 
 func testAccProductDiscountUpdate() string {
 	return `
 	resource "commercetools_product_discount" "standard" {
-	  name        = {
-		en = "My new product discount name"
+		key = "standard_new"
+		name = {
+		  en = "standard name"
+		}
+		description = {
+			en = "Standard description new"
+		  }
+		sort_order             = "0.8"
+		predicate              = "1=1"
+		valid_from             = "2018-01-02T15:04:05Z"
+		valid_until            = "2019-01-02T15:04:05Z"
+
+		value {
+			type      = "relative"
+			permyriad = 1000
+		}
+
+		is_active = false
 	  }
-	  key         = "standard_new"
-	  description = {
-		en = "My new product discount description"
+	  `
+}
+
+func testAccProductDiscountRemoveProperties() string {
+	return `
+	resource "commercetools_product_discount" "standard" {
+		key = "standard_new"
+		name = {
+		  en = "standard name"
+		}
+		sort_order             = "0.8"
+		predicate              = "1=1"
+		value {
+			type      = "relative"
+			permyriad = 1000
+		}
 	  }
-	  predicate   = "1=1"
-	  sort_order  = "0.8"
-	  is_active   = true
-	  value {
-		type = "relative"
-		permyriad = 1000
-	  }
-	}
-  `
+	  `
 }
 
 func testAccCheckProductDiscountDestroy(s *terraform.State) error {
