@@ -1,94 +1,137 @@
 package commercetools
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"time"
 
-	"github.com/hashicorp/terraform/helper/schema"
-	"github.com/labd/commercetools-go-sdk/commercetools"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/resource"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
+	"github.com/labd/commercetools-go-sdk/platform"
 )
 
 func resourceProductDiscount() *schema.Resource {
 	return &schema.Resource{
-		Create: resourceProductDiscountCreate,
-		Read:   resourceProductDiscountRead,
-		Update: resourceProductDiscountUpdate,
-		Delete: resourceProductDiscountDelete,
+		Description: "Product discounts are used to reduce certain product prices.\n\n" +
+			"Also see the [Product Discount API Documentation](https://docs.commercetools.com/api/projects/productDiscounts).",
+		CreateContext: resourceProductDiscountCreate,
+		ReadContext:   resourceProductDiscountRead,
+		UpdateContext: resourceProductDiscountUpdate,
+		DeleteContext: resourceProductDiscountDelete,
 		Importer: &schema.ResourceImporter{
-			State: schema.ImportStatePassthrough,
+			StateContext: schema.ImportStatePassthroughContext,
 		},
+		SchemaVersion: 1,
 		Schema: map[string]*schema.Schema{
-			"name": {
-				Type:     TypeLocalizedString,
-				Required: true,
-			},
 			"key": {
-				Type:     schema.TypeString,
-				Optional: true,
+				Type:        schema.TypeString,
+				Optional:    true,
+				ForceNew:    true,
+				Description: "User-defined unique identifier for the ProductDiscount. Must be unique across a project",
+			},
+			"name": {
+				Description:      "[LocalizedString](https://docs.commercetools.com/api/types#localizedstring)",
+				Type:             TypeLocalizedString,
+				ValidateDiagFunc: validateLocalizedStringKey,
+				Required:         true,
 			},
 			"description": {
-				Type:     TypeLocalizedString,
-				Optional: true,
-			},
-			"predicate": {
-				Type:     schema.TypeString,
-				Optional: true,
-				Default:  "1=1",
-			},
-			"sort_order": {
-				Type:     schema.TypeString,
-				Optional: true,
-			},
-			"is_active": {
-				Type:     schema.TypeBool,
-				Optional: true,
-				Default:  false,
-			},
-			"valid_from": {
-				Type:     schema.TypeString,
-				Optional: true,
-			},
-			"valid_until": {
-				Type:     schema.TypeString,
-				Optional: true,
+				Description:      "[LocalizedString](https://docs.commercetools.com/api/types#localizedstring)",
+				Type:             TypeLocalizedString,
+				ValidateDiagFunc: validateLocalizedStringKey,
+				Optional:         true,
 			},
 			"value": {
+				Description: "Defines the effect the discount will have. " +
+					"[ProductDiscountValue](https://docs.commercetools.com/api/projects/productDiscounts#productdiscountvalue)",
 				Type:     schema.TypeList,
 				MaxItems: 1,
 				Required: true,
 				Elem: &schema.Resource{
 					Schema: map[string]*schema.Schema{
 						"type": {
+							Description:  "Currently supports absolute/relative/external",
 							Type:         schema.TypeString,
 							Required:     true,
-							ValidateFunc: validateProductDiscountType,
+							ValidateFunc: validateValueType,
 						},
-						// Absolute specific fields
+						"permyriad": {
+							Description: "Relative discount specific fields",
+							Type:        schema.TypeInt,
+							Optional:    true,
+						},
 						"money": {
-							Type:     schema.TypeList,
-							Optional: true,
+							Description: "Absolute discount specific fields",
+							Type:        schema.TypeList,
+							Optional:    true,
 							Elem: &schema.Resource{
 								Schema: map[string]*schema.Schema{
-									"cent_amount": {
-										Type:     schema.TypeInt,
-										Required: true,
-									},
 									"currency_code": {
+										Description:  "The currency code compliant to [ISO 4217](https://en.wikipedia.org/wiki/ISO_4217)",
 										Type:         schema.TypeString,
 										Required:     true,
 										ValidateFunc: ValidateCurrencyCode,
 									},
+									"cent_amount": {
+										Description: "The amount in cents (the smallest indivisible unit of the currency)",
+										Type:        schema.TypeInt,
+										Required:    true,
+									},
 								},
 							},
 						},
-						// Relative specific fields
-						"permyriad": {
-							Type:     schema.TypeInt,
-							Optional: true,
+						"product_id": {
+							Description: "Gift Line Item discount specific field",
+							Type:        schema.TypeString,
+							Optional:    true,
+						},
+						"variant": {
+							Description: "Gift Line Item discount specific field",
+							Type:        schema.TypeInt,
+							Optional:    true,
+						},
+						"supply_channel_id": {
+							Description: "Gift Line Item discount specific field",
+							Type:        schema.TypeString,
+							Optional:    true,
+						},
+						"distribution_channel_id": {
+							Description: "Gift Line Item discount specific field",
+							Type:        schema.TypeString,
+							Optional:    true,
 						},
 					},
 				},
+			},
+			"predicate": {
+				Description: "A valid [Product Predicate](https://docs.commercetools.com/api/projects/predicates#product-predicates)",
+				Type:        schema.TypeString,
+				Required:    true,
+			},
+			"sort_order": {
+				Description: "The string must contain a number between 0 and 1. All matching product discounts are " +
+					"applied to a product in the order defined by this field. A discount with greater sort order is " +
+					"prioritized higher than a discount with lower sort order. The sort order is unambiguous among all product discounts",
+				Type:     schema.TypeString,
+				Required: true,
+			},
+			"is_active": {
+				Description: "When set the product discount is applied to products matching the predicate",
+				Type:        schema.TypeBool,
+				Optional:    true,
+				Default:     true,
+			},
+			"valid_from": {
+				Type:             schema.TypeString,
+				Optional:         true,
+				DiffSuppressFunc: diffSuppressDateString,
+			},
+			"valid_until": {
+				Type:             schema.TypeString,
+				Optional:         true,
+				DiffSuppressFunc: diffSuppressDateString,
 			},
 			"version": {
 				Type:     schema.TypeInt,
@@ -98,280 +141,268 @@ func resourceProductDiscount() *schema.Resource {
 	}
 }
 
-func validateProductDiscountType(val interface{}, key string) (warns []string, errs []error) {
-	var v = val.(string)
-
-	switch v {
-	case
-		"external",
-		"relative",
-		"absolute":
-		return
-	default:
-		errs = append(errs, fmt.Errorf("%q not a valid value for %q", val, key))
-	}
-	return
-}
-
-func resourceProductDiscountCreate(d *schema.ResourceData, m interface{}) error {
+func resourceProductDiscountCreate(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
 	client := getClient(m)
 
 	name := expandLocalizedString(d.Get("name"))
 	description := expandLocalizedString(d.Get("description"))
 
-	draft := &commercetools.ProductDiscountDraft{
-		Name:        &name,
-		Key:         d.Get("key").(string),
+	value, err := expandProductDiscountValue(d)
+	if err != nil {
+		return diag.FromErr(err)
+	}
+
+	draft := platform.ProductDiscountDraft{
+		Name:        name,
 		Description: &description,
+		Value:       &value,
 		Predicate:   d.Get("predicate").(string),
-		Value:       expandProductDiscountValue(d),
 		SortOrder:   d.Get("sort_order").(string),
 		IsActive:    d.Get("is_active").(bool),
 	}
 
+	key := stringRef(d.Get("key"))
+	if *key != "" {
+		draft.Key = key
+	}
+
 	if val := d.Get("valid_from").(string); len(val) > 0 {
-		validFrom, err := expandDate(val)
+		validFrom, err := expandTime(val)
 		if err != nil {
-			return err
+			return diag.FromErr(err)
 		}
 		draft.ValidFrom = &validFrom
 	}
 	if val := d.Get("valid_until").(string); len(val) > 0 {
-		validUntil, err := expandDate(val)
+		validUntil, err := expandTime(val)
 		if err != nil {
-			return err
+			return diag.FromErr(err)
 		}
 		draft.ValidUntil = &validUntil
 	}
 
-	log.Printf("[DEBUG] Going to create draft: %#v", draft)
+	var productDiscount *platform.ProductDiscount
+	err = resource.RetryContext(ctx, 1*time.Minute, func() *resource.RetryError {
+		var err error
+		productDiscount, err = client.ProductDiscounts().Post(draft).Execute(ctx)
+		return processRemoteError(err)
+	})
 
-	productDiscount, err := client.ProductDiscountCreate(draft)
 	if err != nil {
-		return err
+		return diag.FromErr(err)
+	}
+
+	if productDiscount == nil {
+		return diag.Errorf("No product discount created")
 	}
 
 	d.SetId(productDiscount.ID)
 	d.Set("version", productDiscount.Version)
 
-	return resourceProductDiscountRead(d, m)
+	return resourceProductDiscountRead(ctx, d, m)
 }
 
-func expandLocalizedString(value interface{}) commercetools.LocalizedString {
-	return commercetools.LocalizedString(
-		expandStringMap(value.(map[string]interface{})))
-}
+func resourceProductDiscountRead(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
+	log.Printf("[DEBUG] Reading product discount from commercetools, with productDiscount id: %s", d.Id())
 
-func expandProductDiscountValue(d *schema.ResourceData) commercetools.ProductDiscountValue {
-	value := d.Get("value").([]interface{})[0].(map[string]interface{})
-
-	log.Printf("[DEBUG] Product discount value: %#v", value)
-
-	switch value["type"].(string) {
-	case "external":
-		return commercetools.ProductDiscountValueExternal{}
-	case "absolute":
-		moneyData := value["money"].([]interface{})
-		moneyList := make([]commercetools.Money, 0)
-		for _, data := range moneyData {
-			mapData := data.(map[string]interface{})
-			currencyCode := mapData["currency_code"].(string)
-			centAmount := mapData["cent_amount"].(int)
-			money := commercetools.Money{
-				CurrencyCode: commercetools.CurrencyCode(currencyCode),
-				CentAmount:   centAmount,
-			}
-			moneyList = append(moneyList, money)
-		}
-
-		return commercetools.ProductDiscountValueAbsolute{
-			Money: moneyList,
-		}
-	case "relative":
-		return commercetools.ProductDiscountValueRelative{
-			Permyriad: value["permyriad"].(int),
-		}
-	default:
-		return fmt.Errorf("Unknown product discount type %s", value["type"])
-	}
-}
-
-func flattenProductDiscountValue(productDiscount commercetools.ProductDiscountValue) (out map[string]interface{}) {
-	out = make(map[string]interface{})
-	if discount, ok := productDiscount.(commercetools.ProductDiscountValueAbsolute); ok {
-		out["type"] = "absolute"
-		out["money"] = flattenProductDiscountAbsolute(discount.Money)
-		return out
-	} else if discount, ok := productDiscount.(commercetools.ProductDiscountValueRelative); ok {
-		out["type"] = "relative"
-		out["permyriad"] = discount.Permyriad
-		return out
-	} else if _, ok := productDiscount.(commercetools.ProductDiscountValueExternal); ok {
-		out["type"] = "external"
-		return out
-	}
-
-	return out
-}
-
-func flattenProductDiscountAbsolute(money []commercetools.Money) []map[string]interface{} {
-	var out = make([]map[string]interface{}, len(money), len(money))
-	for _, moneyEntry := range money {
-		m := make(map[string]interface{})
-		m["currency_code"] = string(moneyEntry.CurrencyCode)
-		m["cent_amount"] = moneyEntry.CentAmount
-		out = append(out, m)
-	}
-	return out
-}
-
-func resourceProductDiscountRead(d *schema.ResourceData, m interface{}) error {
-	log.Print("[DEBUG] Reading product discount from commercetools")
 	client := getClient(m)
 
-	productDiscount, err := client.ProductDiscountGetWithID(d.Id())
-
+	productDiscount, err := client.ProductDiscounts().WithId(d.Id()).Get().Execute(ctx)
 	if err != nil {
-		if ctErr, ok := err.(commercetools.ErrorResponse); ok {
-			if ctErr.StatusCode == 404 {
-				d.SetId("")
-				return nil
-			}
+		if IsResourceNotFoundError(err) {
+			d.SetId("")
+			return nil
 		}
-		return err
+		return diag.FromErr(err)
 	}
 
 	if productDiscount == nil {
-		log.Print("[DEBUG] No product type found")
+		log.Print("[DEBUG] No product discount found")
 		d.SetId("")
 	} else {
-		log.Printf("[DEBUG] Found following product discount: %#v", productDiscount)
+		log.Print("[DEBUG] Found following product discount:")
 		log.Print(stringFormatObject(productDiscount))
 
 		d.Set("version", productDiscount.Version)
-		d.Set("name", productDiscount.Name)
 		d.Set("key", productDiscount.Key)
+		d.Set("name", productDiscount.Name)
 		d.Set("description", productDiscount.Description)
-		if err := d.Set("value", []interface{}{flattenProductDiscountValue(productDiscount)}); err != nil {
-			return err
-		}
+		d.Set("value", flattenProductDiscountValue(productDiscount.Value))
 		d.Set("predicate", productDiscount.Predicate)
 		d.Set("sort_order", productDiscount.SortOrder)
 		d.Set("is_active", productDiscount.IsActive)
-		d.Set("valid_from", nil)
-		if productDiscount.ValidFrom != nil {
-			d.Set("valid_from", flattenDateToString(*productDiscount.ValidFrom))
-		}
-		d.Set("valid_until", nil)
-		if productDiscount.ValidUntil != nil {
-			d.Set("valid_until", flattenDateToString(*productDiscount.ValidUntil))
-		}
+		d.Set("valid_from", flattenTime(productDiscount.ValidFrom))
+		d.Set("valid_until", flattenTime(productDiscount.ValidUntil))
 	}
 
 	return nil
 }
 
-func expandDate(input string) (time.Time, error) {
-	return time.Parse("2006-01-02", input)
-}
-
-func flattenDateToString(input time.Time) string {
-	return input.Format("2006-01-02")
-}
-
-func resourceProductDiscountUpdate(d *schema.ResourceData, m interface{}) error {
+func resourceProductDiscountUpdate(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
 	client := getClient(m)
+	productDiscount, err := client.ProductDiscounts().WithId(d.Id()).Get().Execute(ctx)
+	if err != nil {
+		return diag.FromErr(err)
+	}
 
-	input := &commercetools.ProductDiscountUpdateWithIDInput{
-		ID:      d.Id(),
-		Version: d.Get("version").(int),
-		Actions: []commercetools.ProductDiscountUpdateAction{},
+	input := platform.ProductDiscountUpdate{
+		Version: productDiscount.Version,
+		Actions: []platform.ProductDiscountUpdateAction{},
 	}
 
 	if d.HasChange("key") {
 		newKey := d.Get("key").(string)
 		input.Actions = append(
 			input.Actions,
-			&commercetools.ProductDiscountSetKeyAction{Key: newKey})
-	}
-
-	if d.HasChange("is_active") {
-		isActive := d.Get("is_active").(bool)
-		input.Actions = append(
-			input.Actions,
-			&commercetools.ProductDiscountChangeIsActiveAction{IsActive: isActive})
-	}
-
-	if d.HasChange("predicate") {
-		newPredicate := d.Get("predicate").(string)
-		input.Actions = append(
-			input.Actions,
-			&commercetools.ProductDiscountChangePredicateAction{Predicate: newPredicate})
-	}
-
-	if d.HasChange("sort_order") {
-		newSortOrder := d.Get("sort_order").(string)
-		input.Actions = append(
-			input.Actions,
-			&commercetools.ProductDiscountChangeSortOrderAction{SortOrder: newSortOrder})
-	}
-
-	if d.HasChange("valid_from") {
-		validFrom, err := expandDate(d.Get("valid_from").(string))
-		if err != nil {
-			return err
-		}
-		input.Actions = append(
-			input.Actions,
-			&commercetools.ProductDiscountSetValidFromAction{ValidFrom: &validFrom})
-	}
-
-	if d.HasChange("valid_until") {
-		validUntil, err := expandDate(d.Get("valid_until").(string))
-		if err != nil {
-			return err
-		}
-		input.Actions = append(
-			input.Actions,
-			&commercetools.ProductDiscountSetValidUntilAction{ValidUntil: &validUntil})
+			&platform.ProductDiscountSetKeyAction{Key: &newKey})
 	}
 
 	if d.HasChange("name") {
 		newName := expandLocalizedString(d.Get("name"))
 		input.Actions = append(
 			input.Actions,
-			&commercetools.ProductDiscountChangeNameAction{Name: &newName})
+			&platform.ProductDiscountChangeNameAction{Name: newName})
 	}
 
 	if d.HasChange("description") {
-		newDescr := expandLocalizedString(d.Get("description"))
+		newDescription := expandLocalizedString(d.Get("description"))
 		input.Actions = append(
 			input.Actions,
-			&commercetools.ProductDiscountSetDescriptionAction{Description: &newDescr})
+			&platform.ProductDiscountSetDescriptionAction{Description: &newDescription})
+	}
+
+	if d.HasChange("value") {
+		value, err := expandProductDiscountValue(d)
+		if err != nil {
+			return diag.FromErr(err)
+		}
+		input.Actions = append(
+			input.Actions,
+			&platform.ProductDiscountChangeValueAction{Value: value})
+	}
+
+	if d.HasChange("predicate") {
+		newPredicate := d.Get("predicate").(string)
+		input.Actions = append(
+			input.Actions,
+			&platform.ProductDiscountChangePredicateAction{Predicate: newPredicate})
+	}
+
+	if d.HasChange("sort_order") {
+		newSortOrder := d.Get("sort_order").(string)
+		input.Actions = append(
+			input.Actions,
+			&platform.ProductDiscountChangeSortOrderAction{SortOrder: newSortOrder})
+	}
+
+	if d.HasChange("is_active") {
+		newIsActive := d.Get("is_active").(bool)
+		input.Actions = append(
+			input.Actions,
+			&platform.ProductDiscountChangeIsActiveAction{IsActive: newIsActive})
+	}
+
+	if d.HasChange("valid_from") {
+		if val := d.Get("valid_from").(string); len(val) > 0 {
+			newValidFrom, err := expandTime(d.Get("valid_from").(string))
+			if err != nil {
+				return diag.FromErr(err)
+			}
+			input.Actions = append(
+				input.Actions,
+				&platform.ProductDiscountSetValidFromAction{ValidFrom: &newValidFrom})
+		} else {
+			input.Actions = append(
+				input.Actions,
+				&platform.ProductDiscountSetValidFromAction{})
+		}
+	}
+
+	if d.HasChange("valid_until") {
+		if val := d.Get("valid_until").(string); len(val) > 0 {
+			newValidUntil, err := expandTime(d.Get("valid_until").(string))
+			if err != nil {
+				return diag.FromErr(err)
+			}
+			input.Actions = append(
+				input.Actions,
+				&platform.ProductDiscountSetValidUntilAction{ValidUntil: &newValidUntil})
+		} else {
+			input.Actions = append(
+				input.Actions,
+				&platform.ProductDiscountSetValidUntilAction{})
+		}
 	}
 
 	log.Printf(
 		"[DEBUG] Will perform update operation with the following actions:\n%s",
 		stringFormatActions(input.Actions))
 
-	_, err := client.ProductDiscountUpdateWithID(input)
+	err = resource.RetryContext(ctx, 1*time.Minute, func() *resource.RetryError {
+		_, err := client.ProductDiscounts().WithId(d.Id()).Post(input).Execute(ctx)
+		return processRemoteError(err)
+	})
+
 	if err != nil {
-		if ctErr, ok := err.(commercetools.ErrorResponse); ok {
-			log.Printf("[DEBUG] %v: %v", ctErr, stringFormatErrorExtras(ctErr))
-		}
-		return err
+		return diag.FromErr(err)
 	}
 
-	return resourceProductDiscountRead(d, m)
+	return resourceProductDiscountRead(ctx, d, m)
 }
 
-func resourceProductDiscountDelete(d *schema.ResourceData, m interface{}) error {
+func resourceProductDiscountDelete(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
 	client := getClient(m)
 	version := d.Get("version").(int)
-	_, err := client.ProductDiscountDeleteWithID(d.Id(), version)
+
+	err := resource.RetryContext(ctx, 1*time.Minute, func() *resource.RetryError {
+		_, err := client.ProductDiscounts().WithId(d.Id()).Delete().Version(version).Execute(ctx)
+		return processRemoteError(err)
+	})
 	if err != nil {
-		return err
+		return diag.FromErr(err)
+	}
+	return nil
+}
+
+func expandProductDiscountValue(d *schema.ResourceData) (platform.ProductDiscountValueDraft, error) {
+	value := d.Get("value").([]interface{})[0].(map[string]interface{})
+	switch value["type"].(string) {
+	case "relative":
+		return platform.ProductDiscountValueRelativeDraft{
+			Permyriad: value["permyriad"].(int),
+		}, nil
+	case "absolute":
+		// money := expandTypedMoney(value)
+		return platform.ProductDiscountValueAbsoluteDraft{
+			// Money: money,
+		}, nil
+	case "external":
+		return platform.ProductDiscountValueExternalDraft{}, nil
+	default:
+		return nil, fmt.Errorf("value type %s not implemented", value["type"])
+	}
+}
+
+func flattenProductDiscountValue(val platform.ProductDiscountValue) []map[string]interface{} {
+	if val == nil {
+		return []map[string]interface{}{}
 	}
 
-	return nil
+	switch v := val.(type) {
+	case platform.ProductDiscountValueAbsolute:
+		return []map[string]interface{}{{
+			"type":  "absolute",
+			"money": flattenTypedMoney(v.Money),
+		}}
+	case platform.ProductDiscountValueExternal:
+		return []map[string]interface{}{{
+			"type": "external",
+		}}
+	case platform.ProductDiscountValueRelative:
+		return []map[string]interface{}{{
+			"type":      "relative",
+			"permyriad": v.Permyriad,
+		}}
+	}
+	panic("Unable to flatten product discount value")
 }
